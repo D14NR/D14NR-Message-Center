@@ -6,10 +6,18 @@ import {
   Send, Settings, FileSpreadsheet, CheckCircle2, XCircle, Loader2, Database, RefreshCw, 
   User, Upload, Trash2, X, LayoutDashboard, History as HistoryIcon, 
   MessageSquare, Type, Menu, ShieldCheck, Zap, Globe, Lock, LogOut, 
-  ArrowRight, Sun, Moon, Paperclip, ExternalLink, AlertTriangle, Clock, ChevronDown, Download, MoreVertical
+  ArrowRight, Sun, Moon, Paperclip, ExternalLink, AlertTriangle, Clock, ChevronDown, Download, MoreVertical, Search, Info
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import {
+  Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions,
+  Paper, Card, CardContent, Table, TableBody, TableCell, TableHead, TableRow,
+  Box, Container, Grid, Stack, Typography, Select, MenuItem, FormControl, InputLabel,
+  IconButton, AppBar, Toolbar, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
+  Chip, CircularProgress, Alert, AlertTitle, InputAdornment, Divider, Switch, FormControlLabel,
+  TableContainer, Checkbox, Menu as MuiMenu, Snackbar, Modal, ModalTitle
+} from '@mui/material';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -55,6 +63,15 @@ interface HistoryRow {
 
 type View = 'dashboard' | 'broadcast' | 'configuration' | 'history';
 
+type NotificationVariant = 'success' | 'error' | 'info' | 'warning';
+
+interface NotificationItem {
+  id: string;
+  variant: NotificationVariant;
+  title: string;
+  message: string;
+}
+
 const HISTORY_SHEET_URL = 'https://docs.google.com/spreadsheets/d/17YfjibgKzXX6S7UJEC0OGoDFNwbvqnn5R1rpQOtDhDI/export?format=csv&gid=685286577';
 const LOG_WEBHOOK = 'https://script.google.com/macros/s/AKfycbxGvYq05Cr01naPccLtEw9oJgR0-Gwkm7hrWP8ebl9ltmvZWBtLAxwtWGW0vkTRfWo8/exec';
 
@@ -99,8 +116,39 @@ function App() {
   const [isSelectBroadcastModalOpen, setIsSelectBroadcastModalOpen] = useState(false);
   const [selectBroadcastAction, setSelectBroadcastAction] = useState<'export' | 'delete' | null>(null);
   const [selectedBroadcastForAction, setSelectedBroadcastForAction] = useState<string | null>(null);
+  const [searchBroadcast, setSearchBroadcast] = useState('');
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    cancelLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const t = translations[lang];
+
+  const openConfirmModal = useCallback((options: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+  }) => {
+    setConfirmModal({
+      title: options.title,
+      message: options.message,
+      confirmLabel: options.confirmLabel ?? (lang === 'id' ? 'HAPUS' : 'DELETE'),
+      cancelLabel: options.cancelLabel ?? (lang === 'id' ? 'BATAL' : 'CANCEL'),
+      onConfirm: options.onConfirm,
+    });
+  }, [lang]);
+
+  const showNotification = useCallback((variant: NotificationVariant, title: string, message: string) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setNotifications((prev) => [...prev, { id, variant, title, message }]);
+    window.setTimeout(() => setNotifications((prev) => prev.filter((item) => item.id !== id)), 4200);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('fonnte_api_key', apiKey);
@@ -108,6 +156,10 @@ function App() {
     localStorage.setItem('app_theme', theme);
     if (theme === 'dark') document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
+    try {
+      // notify theme wrapper (main.tsx) so MUI theme can update live
+      window.dispatchEvent(new CustomEvent('theme-changed', { detail: theme }));
+    } catch (err) {}
   }, [apiKey, lang, theme]);
 
   const addLog = useCallback((target: string, status: 'success' | 'error' | 'info', message: string) => {
@@ -150,7 +202,7 @@ function App() {
 
   const exportHistoryData = () => {
     if (historyRows.length === 0) {
-      alert(lang === 'id' ? 'Tidak ada data untuk di export' : 'No data to export');
+      showNotification('info', lang === 'id' ? 'Data Kosong' : 'No Data', lang === 'id' ? 'Tidak ada data untuk di export' : 'No data to export');
       return;
     }
     setSelectBroadcastAction('export');
@@ -159,7 +211,7 @@ function App() {
 
   const deleteHistoryData = () => {
     if (historyRows.length === 0) {
-      alert(lang === 'id' ? 'Tidak ada data untuk dihapus' : 'No data to delete');
+      showNotification('info', lang === 'id' ? 'Data Kosong' : 'No Data', lang === 'id' ? 'Tidak ada data untuk dihapus' : 'No data to delete');
       return;
     }
     setSelectBroadcastAction('delete');
@@ -172,7 +224,7 @@ function App() {
       : historyRows;
     
     if (dataToExport.length === 0) {
-      alert(lang === 'id' ? 'Tidak ada data untuk di export' : 'No data to export');
+      showNotification('info', lang === 'id' ? 'Data Kosong' : 'No Data', lang === 'id' ? 'Tidak ada data untuk di export' : 'No data to export');
       return;
     }
     
@@ -190,17 +242,33 @@ function App() {
     const confirmMessage = lang === 'id' 
       ? `Hapus data broadcast "${broadcastTitle || 'Semua'}"? Tindakan ini tidak dapat dibatalkan.`
       : `Delete "${broadcastTitle || 'All'}" broadcast data? This action cannot be undone.`;
-    
-    if (!confirm(confirmMessage)) return;
-    
-    if (broadcastTitle) {
-      setHistoryData(prev => prev.filter(r => r['Judul broadcast'] !== broadcastTitle));
-    } else {
-      setHistoryData([]);
-    }
-    
-    setIsHistoryMenuOpen(false);
-    addLog('System', 'info', lang === 'id' ? 'Data histori dihapus' : 'History data deleted');
+
+    openConfirmModal({
+      title: lang === 'id' ? 'Konfirmasi Hapus' : 'Delete Confirmation',
+      message: confirmMessage,
+      confirmLabel: lang === 'id' ? 'HAPUS' : 'DELETE',
+      cancelLabel: lang === 'id' ? 'BATAL' : 'CANCEL',
+      onConfirm: () => {
+        if (broadcastTitle) {
+          setHistoryData(prev => prev.filter(r => r['Judul broadcast'] !== broadcastTitle));
+        } else {
+          setHistoryData([]);
+        }
+        setIsHistoryMenuOpen(false);
+        addLog('System', 'info', lang === 'id' ? 'Data histori dihapus' : 'History data deleted');
+      },
+    });
+  };
+
+  const getBroadcastList = () => {
+    const allBroadcasts = Array.from(new Set(historyRows.map(r => r['Judul broadcast'])));
+    if (!searchBroadcast.trim()) return allBroadcasts;
+    return allBroadcasts.filter(b => b.toLowerCase().includes(searchBroadcast.toLowerCase()));
+  };
+
+  const getCountForBroadcast = (title: string | null) => {
+    if (!title) return historyRows.length;
+    return historyRows.filter(r => r['Judul broadcast'] === title).length;
   };
 
   useEffect(() => { if (activeView === 'history' && isLoggedIn) fetchHistory(); }, [activeView, isLoggedIn]);
@@ -262,9 +330,9 @@ function App() {
 
   const startBroadcast = async () => {
     if (isBroadcasting) { setIsBroadcasting(false); isBroadcastingRef.current = false; return; }
-    if (!broadcastTitle) { alert('WAJIB: Judul Broadcast!'); return; }
+    if (!broadcastTitle) { showNotification('warning', 'Judul Diperlukan', 'WAJIB: Judul Broadcast!'); return; }
     const validStatuses = ['Pending', 'WA Active', ''];
-    if (!data.some(row => validStatuses.includes(row.Status))) { alert('No pending.'); return; }
+    if (!data.some(row => validStatuses.includes(row.Status))) { showNotification('info', 'Tidak Ada Pending', 'No pending rows available.'); return; }
     setIsBroadcasting(true); isBroadcastingRef.current = true;
     for (let i = 0; i < data.length; i++) {
       if (!isBroadcastingRef.current) break;
@@ -287,7 +355,7 @@ function App() {
   };
 
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!broadcastTitle) { alert('Isi Judul!'); e.target.value = ''; return; }
+    if (!broadcastTitle) { showNotification('warning', 'Judul Diperlukan', 'Isi Judul!'); e.target.value = ''; return; }
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -308,14 +376,26 @@ function App() {
 
   const SidebarItem = ({ id, label, icon: Icon }: { id: View, label: string, icon: any }) => {
     const handleClick = () => {
-      if (id === 'broadcast' && !deviceInfo) { alert('Silakan hubungkan token Fonnte!'); setActiveView('configuration'); setIsMobileMenuOpen(false); return; }
+      if (id === 'broadcast' && !deviceInfo) { showNotification('warning', 'Butuh Token', 'Silakan hubungkan token Fonnte!'); setActiveView('configuration'); setIsMobileMenuOpen(false); return; }
       setActiveView(id); setIsMobileMenuOpen(false);
     };
     return (
-      <button onClick={handleClick} className={cn("w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all active:scale-95", activeView === id ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800")}>
-        <Icon className="w-5 h-5" />
-        <span className="font-semibold text-sm">{label}</span>
-      </button>
+      <ListItemButton 
+        onClick={handleClick}
+        selected={activeView === id}
+        sx={{
+          borderRadius: 1.5,
+          mb: 1,
+          color: activeView === id ? 'white' : 'text.secondary',
+          backgroundColor: activeView === id ? '#10b981' : 'transparent',
+          '&:hover': { backgroundColor: activeView === id ? '#059669' : 'action.hover' },
+        }}
+      >
+        <ListItemIcon sx={{ minWidth: 40, color: 'inherit' }}>
+          <Icon size={20} />
+        </ListItemIcon>
+        <ListItemText primary={label} primaryTypographyProps={{ sx: { fontWeight: 600, fontSize: '0.95rem' } }} />
+      </ListItemButton>
     );
   };
 
@@ -330,26 +410,54 @@ function App() {
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
-        <div className="absolute top-0 -left-20 w-96 h-96 bg-emerald-500/20 rounded-full blur-[120px]" />
-        <div className="absolute bottom-0 -right-20 w-96 h-96 bg-blue-500/20 rounded-full blur-[120px]" />
-        <div className="w-full max-w-md animate-in fade-in zoom-in duration-500">
-          <div className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-[40px] shadow-2xl p-10 space-y-10 text-center">
-            <div className="space-y-4">
-              <div className="inline-flex bg-gradient-to-br from-emerald-400 to-emerald-600 p-2 rounded-[28px] text-white shadow-xl overflow-hidden"><img src="/logo.png" alt="D14NR Logo" className="w-10 h-10 object-cover" /></div>
-              <div><h1 className="text-3xl font-black text-white tracking-tighter uppercase leading-none">D14NR</h1><p className="text-[12px] font-black text-emerald-400 uppercase tracking-[0.3em] mt-2 leading-none">Message Center</p></div>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); if (fd.get('user') === 'D14nr' && fd.get('pass') === '290192') { setIsLoggedIn(true); localStorage.setItem('isLoggedIn', 'true'); } else alert('Invalid Credentials'); }} className="space-y-6">
-              <div className="space-y-3">
-                <div className="relative"><User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" /><input name="user" type="text" placeholder="Username" className="w-full pl-14 pr-6 py-5 bg-white/5 border border-white/10 rounded-3xl outline-none text-white font-bold" /></div>
-                <div className="relative"><Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" /><input name="pass" type="password" placeholder="Password" className="w-full pl-14 pr-6 py-5 bg-white/5 border border-white/10 rounded-3xl outline-none text-white font-bold" /></div>
-              </div>
-              <button type="submit" className="w-full py-5 bg-emerald-500 text-white rounded-3xl font-black text-sm tracking-widest uppercase shadow-2xl hover:bg-emerald-400 active:scale-95 transition-all">SIGN IN <ArrowRight className="ml-2 w-5 h-5 inline" /></button>
-            </form>
-            <p className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest leading-none">D14nr System © 2026</p>
-          </div>
-        </div>
-      </div>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3, position: 'relative', overflow: 'hidden' }}>
+        <Box sx={{ position: 'absolute', top: 0, left: -80, width: 384, height: 384, background: 'radial-gradient(circle, rgba(16,185,129,0.2) 0%, transparent 70%)', borderRadius: '50%', filter: 'blur(120px)' }} />
+        <Box sx={{ position: 'absolute', bottom: 0, right: -80, width: 384, height: 384, background: 'radial-gradient(circle, rgba(59,130,246,0.2) 0%, transparent 70%)', borderRadius: '50%', filter: 'blur(120px)' }} />
+        <Box sx={{ width: '100%', maxWidth: 400, animation: 'fadeIn 0.5s ease-in' }}>
+          <Paper elevation={3} sx={{ p: 5, textAlign: 'center', background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)' }}>
+            <Box sx={{ mb: 4 }}>
+              <Box sx={{ display: 'inline-flex', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', p: 1, borderRadius: '28px', boxShadow: 3, overflow: 'hidden' }}>
+                <img src="/logo.png" alt="D14NR Logo" style={{ width: 40, height: 40, objectFit: 'cover' }} />
+              </Box>
+              <Typography variant="h3" sx={{ mt: 2, fontWeight: 'black', textTransform: 'uppercase', letterSpacing: '-0.05em' }}>D14NR</Typography>
+              <Typography variant="caption" sx={{ fontWeight: 'bold', color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.3em', mt: 1, display: 'block' }}>Message Center</Typography>
+            </Box>
+            <Box component="form" onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              if (fd.get('user') === 'D14nr' && fd.get('pass') === '290192') {
+                setIsLoggedIn(true);
+                localStorage.setItem('isLoggedIn', 'true');
+              } else {
+                showNotification('error', 'Login Gagal', 'Invalid Credentials');
+              }
+            }} sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
+              <TextField 
+                name="user"
+                type="text"
+                placeholder="Username"
+                variant="outlined"
+                size="small"
+                InputProps={{ startAdornment: <InputAdornment position="start"><User size={20} /></InputAdornment> }}
+                fullWidth
+              />
+              <TextField 
+                name="pass"
+                type="password"
+                placeholder="Password"
+                variant="outlined"
+                size="small"
+                InputProps={{ startAdornment: <InputAdornment position="start"><Lock size={20} /></InputAdornment> }}
+                fullWidth
+              />
+              <Button type="submit" variant="contained" sx={{ py: 1.5, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', fontSize: '0.9rem' }}>
+                SIGN IN <ArrowRight style={{ marginLeft: 8, width: 20, height: 20 }} />
+              </Button>
+            </Box>
+            <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.1em' }}>D14nr System © 2026</Typography>
+          </Paper>
+        </Box>
+      </Box>
     );
   }
 
@@ -358,31 +466,31 @@ function App() {
       {isMobileMenuOpen && <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />}
       <aside className={cn("fixed lg:relative inset-y-0 left-0 w-64 border-r flex flex-col z-50 transition-all duration-300 transform lg:translate-x-0 shadow-sm", isMobileMenuOpen ? "translate-x-0" : "-translate-x-full", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
         <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3"><div className="rounded-xl overflow-hidden shadow-lg"><img src="/logo.png" alt="D14NR Logo" className="w-10 h-10 object-cover" /></div><div className="flex flex-col"><h1 className="text-sm font-black tracking-tighter leading-none uppercase">D14NR</h1><p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest leading-none mt-1">Message Center</p></div></div>
-          <button className="lg:hidden text-slate-400" onClick={() => setIsMobileMenuOpen(false)}><X className="w-6 h-6" /></button>
+          <div className="flex items-center gap-3"><div className="rounded-xl overflow-hidden shadow-lg"><img src="/logo.png" alt="D14NR Logo" className="w-10 h-10 object-cover" /></div><div className="flex flex-col"><h1 className="text-sm font-black tracking-tighter leading-none uppercase">D14NR</h1><p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest leading-none mt-1">Message Center</p></div></div>
+          <button className="lg:hidden text-slate-300" onClick={() => setIsMobileMenuOpen(false)}><X className="w-6 h-6" /></button>
         </div>
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <SidebarItem id="dashboard" label={t.dashboard} icon={LayoutDashboard} />
           <SidebarItem id="broadcast" label={t.broadcast} icon={MessageSquare} />
           <SidebarItem id="history" label={t.history} icon={HistoryIcon} />
-          <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest px-4">System</div>
+          <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-300 dark:text-white uppercase tracking-widest px-4">System</div>
           <SidebarItem id="configuration" label={t.configuration} icon={Settings} />
         </nav>
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-4 text-center">
           <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center gap-3 text-left">
-            <div className={cn("w-2.5 h-2.5 rounded-full", deviceInfo?.device_status === 'connect' ? "bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-slate-300 dark:bg-slate-600")} />
-            <div className="flex flex-col leading-tight"><span className="text-[10px] font-bold text-slate-400 uppercase">{t.status}</span><span className="text-[11px] font-black truncate uppercase tracking-tighter">{deviceInfo?.name || 'OFFLINE'}</span></div>
+            <div className={cn("w-2.5 h-2.5 rounded-full", deviceInfo?.device_status === 'connect' ? "bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" : "bg-slate-300 dark:bg-slate-600")} />
+            <div className="flex flex-col leading-tight"><span className="text-[10px] font-bold text-slate-400 dark:text-white uppercase">{t.status}</span><span className="text-[11px] font-black truncate uppercase tracking-tighter">{deviceInfo?.name || 'OFFLINE'}</span></div>
           </div>
-          <p className="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest leading-none">Copyright D14nr@2026</p>
+          <p className="text-[9px] font-black text-slate-300 dark:text-white uppercase tracking-widest leading-none">Copyright D14nr@2026</p>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className={cn("h-16 lg:h-14 border-b flex items-center justify-between px-4 lg:px-8 z-30 shrink-0 shadow-sm", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
-          <div className="flex items-center gap-3"><button className="lg:hidden p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg" onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button><h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{activeView}</h2></div>
+          <div className="flex items-center gap-3"><button className="lg:hidden p-2 text-slate-500 dark:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg" onClick={() => setIsMobileMenuOpen(true)}><Menu className="w-6 h-6" /></button><h2 className="text-[10px] font-black text-slate-400 dark:text-white uppercase tracking-widest">{activeView}</h2></div>
           <div className="flex items-center gap-4">
-            {isBroadcasting && <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 rounded-full animate-pulse text-[10px] font-black uppercase">Broadcasting</div>}
-            <button onClick={() => { setIsLoggedIn(false); localStorage.removeItem('isLoggedIn'); }} className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-900/30 hover:text-rose-600 text-slate-500 rounded-xl transition-all font-black text-[10px] uppercase shadow-sm"><LogOut className="w-3.5 h-3.5" /> LOGOUT</button>
+            {isBroadcasting && <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 rounded-full animate-pulse text-[10px] font-black uppercase">Broadcasting</div>}
+            <button onClick={() => { setIsLoggedIn(false); localStorage.removeItem('isLoggedIn'); }} className="flex items-center gap-2 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/20 hover:bg-indigo-200 dark:hover:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 rounded-lg transition-all font-bold text-[10px] uppercase shadow-sm hover:shadow-md"><LogOut className="w-3.5 h-3.5" /> LOGOUT</button>
           </div>
         </header>
 
@@ -394,16 +502,16 @@ function App() {
                   {[ { l: t.total_data, v: stats.total, i: Database, c: 'text-slate-600' }, { l: t.pending, v: stats.pending, i: Loader2, c: 'text-amber-600' }, { l: t.success, v: stats.success, i: CheckCircle2, c: 'text-emerald-600' }, { l: t.failed, v: stats.failed, i: XCircle, c: 'text-rose-600' } ].map((s, i) => (
                     <div key={i} className={cn("p-5 lg:p-6 rounded-[32px] border shadow-sm flex items-center gap-4 transition-all", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200 shadow-slate-200/20")}>
                       <div className={cn("p-4 rounded-[20px] bg-slate-50 dark:bg-slate-800", s.c)}><s.i className="w-6 h-6" /></div>
-                      <div><p className="text-[10px] font-black text-slate-400 mb-1">{s.l}</p><p className={cn("text-2xl lg:text-3xl font-black", s.c)}>{s.v}</p></div>
+                      <div><p className="text-[10px] font-black text-slate-400 dark:text-white mb-1">{s.l}</p><p className={cn("text-2xl lg:text-3xl font-black", s.c)}>{s.v}</p></div>
                     </div>
                   ))}
                 </div>
-                <div className="bg-gradient-to-br from-emerald-600 to-emerald-800 p-8 lg:p-10 rounded-[48px] text-white shadow-2xl relative overflow-hidden group">
+                <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-8 lg:p-10 rounded-[48px] text-white shadow-2xl relative overflow-hidden group">
                   <div className="absolute -right-10 -bottom-10 opacity-10 group-hover:scale-110 transition-transform duration-700 font-black italic text-9xl">D14NR</div>
                   <div className="relative z-10 space-y-8">
                     <div className="space-y-4 leading-none"><h3 className="text-3xl lg:text-4xl font-black uppercase tracking-tight">Empowering Communication</h3><p className="text-emerald-100/80 font-medium max-w-lg text-lg leading-relaxed mt-4">D14NR Message Center bekerjasama dengan Fonnte menghadirkan solusi pengiriman pesan WhatsApp yang aman dan efisien.</p></div>
                     <div className="flex flex-wrap gap-4 leading-none"><div className="bg-white/10 backdrop-blur-md px-5 py-2.5 rounded-[20px] flex items-center gap-2 border border-white/5"><ShieldCheck className="w-4 h-4" /><span className="text-[10px] font-black uppercase tracking-widest">Anti-Spam Tech</span></div><div className="bg-white/10 backdrop-blur-md px-5 py-2.5 rounded-[20px] flex items-center gap-2 border border-white/5"><Zap className="w-4 h-4" /><span className="text-[10px] font-black uppercase tracking-widest">Instant Delivery</span></div><div className="bg-white/10 backdrop-blur-md px-5 py-2.5 rounded-[20px] flex items-center gap-2 border border-white/5"><Globe className="w-4 h-4" /><span className="text-[10px] font-black uppercase tracking-widest">Global Reach</span></div></div>
-                    <button onClick={() => setActiveView('broadcast')} className="mt-4 px-12 py-5 bg-white text-emerald-700 rounded-[24px] font-black shadow-2xl hover:scale-105 transition-all uppercase tracking-widest text-sm leading-none">{t.start_now}</button>
+                    <button onClick={() => setActiveView('broadcast')} className="mt-4 px-12 py-5 bg-white text-indigo-700 rounded-[24px] font-black shadow-2xl hover:scale-105 transition-all uppercase tracking-widest text-sm leading-none hover:shadow-indigo-700/20">{t.start_now}</button>
                   </div>
                 </div>
               </div>
@@ -415,26 +523,26 @@ function App() {
                   {[ { l: t.total_data, v: stats.total, i: Database, c: 'text-slate-600' }, { l: t.pending, v: stats.pending, i: Loader2, c: 'text-amber-600' }, { l: t.success, v: stats.success, i: CheckCircle2, c: 'text-emerald-600' }, { l: t.failed, v: stats.failed, i: XCircle, c: 'text-rose-600' } ].map((s, i) => (
                     <div key={i} className={cn("p-3 lg:p-4 rounded-[24px] border shadow-sm flex items-center gap-3 transition-all", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200 shadow-slate-200/20")}>
                       <div className={cn("p-2 rounded-xl bg-slate-50 dark:bg-slate-800", s.c)}><s.i className={cn("w-4 lg:w-5 h-4 lg:h-5", s.l === t.pending && isBroadcasting && "animate-spin")} /></div>
-                      <div className="min-w-0"><p className="text-[8px] lg:text-[9px] font-black text-slate-400 leading-none mb-1 truncate uppercase">{s.l}</p><p className={cn("text-base lg:text-xl font-black truncate", s.c)}>{s.v}</p></div>
+                      <div className="min-w-0"><p className="text-[8px] lg:text-[9px] font-black text-slate-300 dark:text-white leading-none mb-1 truncate uppercase">{s.l}</p><p className={cn("text-base lg:text-xl font-black truncate", s.c)}>{s.v}</p></div>
                     </div>
                   ))}
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 pb-20 leading-none">
                   <div className="lg:col-span-4 space-y-6 order-2 lg:order-1">
                     <div className={cn("p-5 lg:p-6 rounded-[32px] border space-y-4 shadow-sm", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
-                      <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-black text-[11px] uppercase tracking-widest"><Type className="w-4 h-4 text-emerald-500" /> {t.title}</div>
-                      <input type="text" value={broadcastTitle} onChange={(e) => setBroadcastTitle(e.target.value)} className={cn("w-full px-4 py-3 border rounded-2xl text-xs font-bold outline-none", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-100 text-slate-700")} />
+                        <div className="flex items-center gap-2 text-slate-900 dark:text-white font-black text-[11px] uppercase tracking-widest"><Type className="w-4 h-4 text-indigo-500" /> {t.title}</div>
+                      <input type="text" value={broadcastTitle} onChange={(e) => setBroadcastTitle(e.target.value)} placeholder="Enter broadcast title..." className={cn("w-full px-4 py-3 border rounded-2xl text-xs font-bold outline-none", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300" : "bg-slate-50 border-slate-100 text-slate-700 placeholder-slate-400")} />
                     </div>
                     <div className={cn("p-5 lg:p-6 rounded-[32px] border space-y-4 shadow-sm", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
-                      <div className="flex items-center justify-between font-black text-[11px] uppercase tracking-widest text-slate-800 dark:text-slate-100"><div className="flex items-center gap-2"><Upload className="w-4 h-4 text-emerald-500" /> Excel</div><button onClick={() => { const ws = XLSX.utils.json_to_sheet([{ 'Nomor Telepon': '08123...', 'Nama': 'Budi' }]); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Sheet1"); XLSX.writeFile(wb, "template.xlsx"); }} className="text-[9px] bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg text-slate-500 font-black border dark:border-slate-700">TEMPLATE</button></div>
-                      <div className="relative border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl p-6 bg-slate-50/50 dark:bg-slate-800/50 text-center hover:border-emerald-500 transition-colors"><input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" /><FileSpreadsheet className="w-10 h-10 text-slate-300 mx-auto mb-2" /><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.excel_upload}</p></div>
+                      <div className="flex items-center justify-between font-black text-[11px] uppercase tracking-widest text-slate-800 dark:text-white"><div className="flex items-center gap-2"><Upload className="w-4 h-4 text-indigo-500" /> Excel</div><button onClick={() => { const ws = XLSX.utils.json_to_sheet([{ 'Nomor Telepon': '08123...', 'Nama': 'Budi' }]); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Sheet1"); XLSX.writeFile(wb, "template.xlsx"); }} className="text-[9px] bg-indigo-100 dark:bg-indigo-900/20 px-2.5 py-1.5 rounded-lg text-indigo-700 dark:text-indigo-300 font-black border dark:border-indigo-800">TEMPLATE</button></div>
+                      <div className="relative border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl p-6 bg-indigo-50/30 dark:bg-indigo-900/10 text-center hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 transition-colors"><input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" /><FileSpreadsheet className="w-10 h-10 text-indigo-300 dark:text-indigo-700 mx-auto mb-2" /><p className="text-[10px] font-black text-slate-400 dark:text-white uppercase tracking-widest">{t.excel_upload}</p></div>
                     </div>
                     <div className={cn("p-5 lg:p-6 rounded-[32px] border space-y-4 shadow-sm", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
-                      <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-black text-[11px] uppercase tracking-widest"><User className="w-4 h-4 text-emerald-500" /> {t.manual_add}</div>
-                      <form onSubmit={(e) => { e.preventDefault(); if (!broadcastTitle) { alert('Isi Judul!'); return; } const list = manualPhone.split(/[,\n]/).map(p => p.trim()).filter(p => p !== ''); const newRows = list.map((p, i) => ({ 'Nomor Telepon': p, 'Nama': manualName || 'Recipient', 'Pesan': manualMessage, 'Status': 'Pending', __id: Date.now() + i })); setData(p => [...p, ...newRows]); if (autoCheck) bulkCheckWhatsApp(newRows); setManualPhone(''); setManualName(''); setManualMessage(''); }} className="space-y-3">
-                        <textarea value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} placeholder="0812, 0856..." className={cn("w-full p-4 border rounded-2xl text-xs font-bold h-20 resize-none outline-none", theme === 'dark' ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-100")} />
-                        <input type="text" value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Name" className={cn("w-full p-4 border rounded-2xl text-xs font-bold outline-none", theme === 'dark' ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-100")} />
-                        <button type="submit" className="w-full py-4 bg-slate-900 dark:bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all">ADD TO QUEUE</button>
+                      <div className="flex items-center gap-2 text-slate-900 dark:text-white font-black text-[11px] uppercase tracking-widest"><User className="w-4 h-4 text-indigo-500" /> {t.manual_add}</div>
+                      <form onSubmit={(e) => { e.preventDefault(); if (!broadcastTitle) { showNotification('warning', 'Judul Diperlukan', 'Isi Judul!'); return; } const list = manualPhone.split(/[,\n]/).map(p => p.trim()).filter(p => p !== ''); const newRows = list.map((p, i) => ({ 'Nomor Telepon': p, 'Nama': manualName || 'Recipient', 'Pesan': manualMessage, 'Status': 'Pending', __id: Date.now() + i })); setData(p => [...p, ...newRows]); if (autoCheck) bulkCheckWhatsApp(newRows); setManualPhone(''); setManualName(''); setManualMessage(''); }} className="space-y-3">
+                        <textarea value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} placeholder="0812, 0856..." className={cn("w-full p-4 border rounded-2xl text-xs font-bold h-20 resize-none outline-none", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300" : "bg-slate-50 border-slate-100 text-slate-700 placeholder-slate-400")} />
+                        <input type="text" value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Name" className={cn("w-full p-4 border rounded-2xl text-xs font-bold outline-none", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300" : "bg-slate-50 border-slate-100 text-slate-700 placeholder-slate-400")} />
+                        <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition-all">ADD TO QUEUE</button>
                       </form>
                     </div>
                   </div>
@@ -448,22 +556,28 @@ function App() {
                           <div className="relative group ml-2">
                             <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 lg:p-1.5 rounded-xl border dark:border-slate-700 pr-4">
                               <div className="p-1 bg-white dark:bg-slate-900 rounded-lg text-emerald-600 shadow-sm"><Clock className="w-3 h-3" /></div>
-                              <select value={delayRange} onChange={(e) => setDelayRange(e.target.value)} className="bg-transparent text-[10px] font-black uppercase outline-none cursor-pointer appearance-none">
+                              <select value={delayRange} onChange={(e) => setDelayRange(e.target.value)} className="bg-transparent text-slate-700 dark:text-white text-[10px] font-black uppercase outline-none cursor-pointer appearance-none">
                                 {['10-25', '10-30', '10-35', '10-40', '10-45', '10-50', '10-55', '10-60'].map(r => <option key={r} value={r}>{r}s</option>)}
                               </select>
-                              <ChevronDown className="w-3 h-3 text-slate-400 -ml-2" />
+                              <ChevronDown className="w-3 h-3 text-slate-400 dark:text-white -ml-2" />
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => { if(confirm('Clear?')) setData([]) }} className="text-slate-300 hover:text-rose-500 p-2"><Trash2 className="w-4 h-4 lg:w-5 lg:h-5" /></button>
+                          <button onClick={() => openConfirmModal({
+                            title: lang === 'id' ? 'Konfirmasi Clear' : 'Confirm Clear',
+                            message: lang === 'id' ? 'Hapus semua data antrean?' : 'Clear all queued data?',
+                            confirmLabel: lang === 'id' ? 'HAPUS' : 'CLEAR',
+                            cancelLabel: lang === 'id' ? 'BATAL' : 'CANCEL',
+                            onConfirm: () => setData([]),
+                          })} className="text-slate-400 dark:text-white hover:text-rose-500 p-2"><Trash2 className="w-4 h-4 lg:w-5 lg:h-5" /></button>
                         </div>
                       </div>
                       <div className="flex-1 overflow-auto px-2 lg:px-4">
-                        <table className="w-full text-left border-collapse min-w-[700px]"><thead className="bg-slate-50/50 dark:bg-slate-800 sticky top-0 text-[10px] uppercase font-black text-slate-400 border-b dark:border-slate-800 z-10 tracking-[0.2em]"><tr className="px-6"><th className="pl-6 lg:pl-10 py-5 w-10">#</th><th className="px-4 lg:px-6 py-4">Recipient</th><th className="px-4 lg:px-6 py-4">Preview</th><th className="px-4 lg:px-6 py-4 w-24 text-center">Status</th><th className="px-4 lg:px-6 py-4 w-24 text-center">Action</th></tr></thead>
-                        <tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-[11px] lg:text-xs font-bold">{data.map((row, idx) => (<tr key={idx} className={cn("hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-all", currentIndex === idx && "bg-amber-50 dark:bg-amber-900/10 animate-pulse")}><td className="pl-6 lg:pl-10 py-5 text-slate-300 dark:text-slate-700 font-black">{idx+1}</td><td className="px-4 lg:px-6 py-4"><div>{row.Nama}</div><div className="text-[10px] text-slate-400 mt-1 font-mono tracking-tighter">{row['Nomor Telepon']}</div></td><td className="px-4 lg:px-6 py-4 text-slate-500 dark:text-slate-400 italic truncate max-w-[200px] leading-relaxed flex flex-col gap-1">{row.Lampiran && <div className="inline-flex items-center gap-1 text-[8px] bg-sky-50 dark:bg-sky-900/20 text-sky-600 px-1.5 py-0.5 rounded uppercase font-black shrink-0 w-fit leading-none"><Paperclip className="w-2.5 h-2.5" /> Media</div>}{row.Pesan.replace(/{nama}/gi, row.Nama) || '-'}</td><td className="px-4 lg:px-6 py-4 text-center"><span className={cn("px-3 py-2 rounded-xl text-[9px] font-black uppercase inline-flex items-center gap-1.5 shadow-inner transition-colors", row.Status === 'Success' ? "bg-emerald-100 text-emerald-700" : row.Status === 'Failed' ? "bg-rose-100 text-rose-700" : "bg-slate-100 dark:bg-slate-800 text-slate-400 shadow-none")}>{currentIndex === idx ? <Loader2 className="w-3 h-3 animate-spin" /> : null}{currentIndex === idx ? 'Sending' : (row.Status || 'Pending')}</span></td><td className="px-4 lg:px-6 py-4 text-center"><button onClick={() => setData(p => p.filter(r => r.__id !== row.__id))} className="text-rose-400 p-2 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button></td></tr>))}</tbody></table>
+                        <table className="w-full text-left border-collapse min-w-[700px]"><thead className="bg-slate-50/50 dark:bg-slate-800 sticky top-0 text-[10px] uppercase font-black text-slate-400 dark:text-white border-b dark:border-slate-800 z-10 tracking-[0.2em]"><tr className="px-6"><th className="pl-6 lg:pl-10 py-5 w-10">#</th><th className="px-4 lg:px-6 py-4">Recipient</th><th className="px-4 lg:px-6 py-4">Preview</th><th className="px-4 lg:px-6 py-4 w-24 text-center">Status</th><th className="px-4 lg:px-6 py-4 w-24 text-center">Action</th></tr></thead>
+                        <tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-[11px] lg:text-xs font-bold">{data.map((row, idx) => (<tr key={idx} className={cn("hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-all", currentIndex === idx && "bg-amber-50 dark:bg-amber-900/10 animate-pulse")}><td className="pl-6 lg:pl-10 py-5 text-slate-300 dark:text-slate-50 font-black">{idx+1}</td><td className="px-4 lg:px-6 py-4"><div className="text-slate-900 dark:text-slate-100">{row.Nama}</div><div className="text-[10px] text-slate-500 dark:text-slate-300 mt-1 font-mono tracking-tighter">{row['Nomor Telepon']}</div></td><td className="px-4 lg:px-6 py-4 text-slate-600 dark:text-slate-200 italic truncate max-w-[200px] leading-relaxed flex flex-col gap-1">{row.Lampiran && <div className="inline-flex items-center gap-1 text-[8px] bg-sky-50 dark:bg-sky-900/20 text-sky-600 px-1.5 py-0.5 rounded uppercase font-black shrink-0 w-fit leading-none"><Paperclip className="w-2.5 h-2.5" /> Media</div>}{row.Pesan.replace(/{nama}/gi, row.Nama) || '-'}</td><td className="px-4 lg:px-6 py-4 text-center"><span className={cn("px-3 py-2 rounded-xl text-[9px] font-black uppercase inline-flex items-center gap-1.5 shadow-inner transition-colors", row.Status === 'Success' ? "bg-emerald-100 text-emerald-700" : row.Status === 'Failed' ? "bg-rose-100 text-rose-700" : "bg-slate-100 dark:bg-slate-800 text-slate-400 shadow-none")}>{currentIndex === idx ? <Loader2 className="w-3 h-3 animate-spin" /> : null}{currentIndex === idx ? 'Sending' : (row.Status || 'Pending')}</span></td><td className="px-4 lg:px-6 py-4 text-center"><button onClick={() => setData(p => p.filter(r => r.__id !== row.__id))} className="text-rose-400 p-2 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button></td></tr>))}</tbody></table>
                       </div>
-                      <div className="p-6 lg:p-10 bg-slate-50 dark:bg-slate-800/50 border-t dark:border-slate-700 shrink-0"><button onClick={startBroadcast} disabled={data.length === 0} className={cn("w-full py-5 rounded-[28px] font-black text-white shadow-2xl transition-all active:scale-95 flex items-center justify-center gap-4 tracking-[0.2em] uppercase text-sm lg:text-base", isBroadcasting ? "bg-rose-500 shadow-rose-200" : "bg-emerald-600 shadow-emerald-500/20 hover:bg-emerald-700 disabled:bg-slate-300 dark:disabled:bg-slate-900 disabled:text-slate-500 shadow-emerald-100")}>{isBroadcasting ? 'STOP ENGINE' : t.start_now}</button></div>
+                      <div className="p-6 lg:p-10 bg-gradient-to-r from-indigo-600/5 to-violet-600/5 dark:from-indigo-900/10 dark:to-violet-900/10 border-t dark:border-slate-700 shrink-0"><button onClick={startBroadcast} disabled={data.length === 0} className={cn("w-full py-5 rounded-[28px] font-black text-white shadow-2xl transition-all active:scale-95 flex items-center justify-center gap-4 tracking-[0.2em] uppercase text-sm lg:text-base", isBroadcasting ? "bg-rose-500 shadow-rose-500/40 hover:bg-rose-600" : "bg-indigo-600 shadow-indigo-600/40 hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-900 disabled:text-slate-500 dark:disabled:text-slate-400")}>{isBroadcasting ? 'STOP ENGINE' : t.start_now}</button></div>
                     </div>
                   </div>
                 </div>
@@ -478,12 +592,12 @@ function App() {
                     <div className="flex items-center gap-4"><div className="bg-slate-900 dark:bg-slate-800 p-4 rounded-3xl text-white shadow-lg"><Settings className="w-7 h-7" /></div><h3 className="text-2xl lg:text-3xl font-black uppercase tracking-tight">{t.system_config}</h3></div>
                     <div className="space-y-10">
                       <div className="space-y-4">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">{t.api_key}</label>
+                        <label className="text-[10px] font-black text-slate-400 dark:text-white uppercase tracking-widest px-2">{t.api_key}</label>
                         <div className="flex flex-col sm:flex-row gap-4">
-                          <input type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); setIsTokenChanged(true); }} placeholder="Paste Fonnte Key..." className={cn("flex-1 px-8 py-5 border rounded-[28px] outline-none font-bold text-sm transition-all focus:ring-4 focus:ring-emerald-500/10", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-100 text-slate-700")} />
+                          <input type="password" value={apiKey} onChange={(e) => { setApiKey(e.target.value); setIsTokenChanged(true); }} placeholder="Paste Fonnte Key..." className={cn("flex-1 px-8 py-5 border rounded-[28px] outline-none font-bold text-sm transition-all focus:ring-4 focus:ring-indigo-500/20", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300" : "bg-slate-50 border-slate-100 text-slate-700 placeholder-slate-400")} />
                           <div className="flex gap-2">
                             {deviceInfo ? (
-                              <><div className="flex-1 sm:flex-none px-8 py-5 bg-emerald-500 text-white rounded-[28px] font-black text-[10px] tracking-widest flex items-center justify-center gap-2 shadow-lg"><CheckCircle2 className="w-4 h-4" /> {t.connected}</div><button onClick={() => { setDeviceInfo(null); setApiKey(''); setIsTokenChanged(false); }} className="px-8 py-5 bg-rose-500 text-white rounded-[28px] shadow-lg hover:bg-rose-600 transition-all font-black text-[10px] uppercase shadow-rose-100">{t.disconnect}</button></>
+                              <><div className="flex-1 sm:flex-none px-8 py-5 bg-indigo-600 text-white rounded-[28px] font-black text-[10px] tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"><CheckCircle2 className="w-4 h-4" /> {t.connected}</div><button onClick={() => { setDeviceInfo(null); setApiKey(''); setIsTokenChanged(false); }} className="px-8 py-5 bg-rose-500 text-white rounded-[28px] shadow-lg shadow-rose-500/30 hover:bg-rose-600 transition-all font-black text-[10px] uppercase">{t.disconnect}</button></>
                             ) : (
                               <button onClick={() => checkConnection(false)} className={cn("flex-1 sm:flex-none px-10 py-5 rounded-[28px] font-black text-[10px] tracking-[0.2em] transition-all shadow-xl active:scale-95", isTokenChanged ? "bg-amber-400 text-amber-950 shadow-amber-100" : "bg-rose-500 text-white shadow-rose-500/20")}>{isCheckingConnection ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : (isTokenChanged ? t.connect : t.not_connected)}</button>
                             )}
@@ -491,48 +605,58 @@ function App() {
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">{t.theme}</label>
+                        <div className="space-y-4"><label className="text-[10px] font-black text-slate-400 dark:text-white uppercase tracking-widest px-2">{t.theme}</label>
                           <div className={cn("grid grid-cols-2 p-2 rounded-[32px] border transition-all", theme === 'dark' ? "bg-slate-800 border-slate-700 shadow-inner" : "bg-slate-100 border-slate-200")}>
-                            <button onClick={() => setTheme('light')} className={cn("flex items-center justify-center gap-2 py-4 rounded-[24px] text-[10px] font-black uppercase transition-all", theme === 'light' ? "bg-white text-emerald-600 shadow-xl" : "text-slate-500")}><Sun className="w-4 h-4" /> {t.light}</button>
-                            <button onClick={() => setTheme('dark')} className={cn("flex items-center justify-center gap-2 py-4 rounded-[24px] text-[10px] font-black uppercase transition-all", theme === 'dark' ? "bg-slate-900 text-emerald-400 shadow-xl" : "text-slate-500")}><Moon className="w-4 h-4" /> {t.dark}</button>
+                            <button onClick={() => setTheme('light')} className={cn("flex items-center justify-center gap-2 py-4 rounded-[24px] text-[10px] font-black uppercase transition-all", theme === 'light' ? "bg-white text-emerald-600 shadow-xl" : "text-slate-500 dark:text-white")}><Sun className="w-4 h-4" /> {t.light}</button>
+                            <button onClick={() => setTheme('dark')} className={cn("flex items-center justify-center gap-2 py-4 rounded-[24px] text-[10px] font-black uppercase transition-all", theme === 'dark' ? "bg-slate-900 text-emerald-400 shadow-xl" : "text-slate-500 dark:text-white")}><Moon className="w-4 h-4" /> {t.dark}</button>
                           </div>
                         </div>
-                        <div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">{t.language}</label>
+                        <div className="space-y-4"><label className="text-[10px] font-black text-slate-400 dark:text-white uppercase tracking-widest px-2">{t.language}</label>
                           <div className={cn("grid grid-cols-2 p-2 rounded-[32px] border transition-all", theme === 'dark' ? "bg-slate-800 border-slate-700 shadow-inner" : "bg-slate-100 border-slate-200")}>
-                            <button onClick={() => setLang('id')} className={cn("py-4 rounded-[24px] text-[10px] font-black transition-all uppercase tracking-widest", lang === 'id' ? "bg-emerald-600 text-white shadow-xl" : "text-slate-500")}>ID</button>
-                            <button onClick={() => setLang('en')} className={cn("py-4 rounded-[24px] text-[10px] font-black transition-all uppercase tracking-widest", lang === 'en' ? "bg-emerald-600 text-white shadow-xl" : "text-slate-500")}>EN</button>
+                            <button onClick={() => setLang('id')} className={cn("py-4 rounded-[24px] text-[10px] font-black transition-all uppercase tracking-widest", lang === 'id' ? "bg-indigo-600 text-white shadow-xl" : "text-slate-500 dark:text-white")}>ID</button>
+                            <button onClick={() => setLang('en')} className={cn("py-4 rounded-[24px] text-[10px] font-black transition-all uppercase tracking-widest", lang === 'en' ? "bg-indigo-600 text-white shadow-xl" : "text-slate-500 dark:text-white")}>EN</button>
                           </div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </section>
-                {deviceInfo && (<div className="bg-white p-6 lg:p-10 rounded-[32px] lg:rounded-[40px] border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-2 gap-6 lg:gap-10 relative overflow-hidden transition-all duration-500"><div className="absolute top-0 bottom-0 left-0 w-3 bg-emerald-500" />{[{ l: 'DEVICE NAME', v: deviceInfo.name }, { l: 'STATUS', v: deviceInfo.device_status, active: deviceInfo.device_status === 'connect' }, { l: 'QUOTA', v: `${deviceInfo.quota} MSG` }, { l: 'EXPIRED', v: deviceInfo.expired }].map((d, i) => (<div key={i} className="space-y-1"><p className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">{d.l}</p><p className={cn("text-base lg:text-lg font-black text-slate-800 uppercase tracking-tight", d.active && "text-emerald-600")}>{d.v}</p></div>))}</div>)}
+                {deviceInfo && (
+                  <div className="bg-white dark:bg-slate-900 p-6 lg:p-10 rounded-[32px] lg:rounded-[40px] border border-slate-200 dark:border-slate-800 shadow-sm grid grid-cols-1 sm:grid-cols-2 gap-6 lg:gap-10 relative overflow-hidden transition-all duration-500">
+                    <div className="absolute top-0 bottom-0 left-0 w-3 bg-indigo-600" />
+                    {[{ l: 'DEVICE NAME', v: deviceInfo.name }, { l: 'STATUS', v: deviceInfo.device_status, active: deviceInfo.device_status === 'connect' }, { l: 'QUOTA', v: `${deviceInfo.quota} MSG` }, { l: 'EXPIRED', v: deviceInfo.expired }].map((d, i) => (
+                      <div key={i} className="space-y-1">
+                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">{d.l}</p>
+                        <p className={cn("text-base lg:text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight", d.active && "text-indigo-600")}>{d.v}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
             {activeView === 'history' && (
               <div className="space-y-6 animate-in fade-in duration-500 pb-20">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4"><div className="bg-emerald-100 dark:bg-emerald-900/30 p-4 rounded-3xl text-emerald-600 shadow-sm shrink-0"><HistoryIcon className="w-7 h-7" /></div><div><h3 className="text-2xl lg:text-3xl font-black text-slate-800 dark:text-white uppercase leading-none tracking-tight">{t.history}</h3></div></div>
+                  <div className="flex items-center gap-4"><div className="bg-indigo-100 dark:bg-indigo-900/30 p-4 rounded-3xl text-indigo-600 shadow-sm shrink-0"><HistoryIcon className="w-7 h-7" /></div><div><h3 className="text-2xl lg:text-3xl font-black text-slate-800 dark:text-white uppercase leading-none tracking-tight">{t.history}</h3></div></div>
                   <div className="flex items-center gap-3">
-                    <button onClick={fetchHistory} disabled={isFetchingHistory} className="px-8 py-3 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl text-[10px] font-black text-slate-500 flex items-center justify-center gap-3 shadow-sm hover:shadow-lg transition-all uppercase tracking-widest">{isFetchingHistory ? <Loader2 className="w-4 h-4 animate-spin text-emerald-500" /> : <RefreshCw className="w-4 h-4" />} SYNC DATA</button>
+                    <button onClick={fetchHistory} disabled={isFetchingHistory} className="px-8 py-3 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl text-[10px] font-black text-slate-500 dark:text-white flex items-center justify-center gap-3 shadow-sm hover:shadow-md transition-all uppercase tracking-widest hover:bg-indigo-50 dark:hover:bg-indigo-900/10">{isFetchingHistory ? <Loader2 className="w-4 h-4 animate-spin text-indigo-600" /> : <RefreshCw className="w-4 h-4" />} SYNC DATA</button>
                     <div className="relative">
-                      <button onClick={() => setIsHistoryMenuOpen(!isHistoryMenuOpen)} className="px-4 py-3 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl text-slate-500 flex items-center justify-center gap-2 shadow-sm hover:shadow-lg transition-all"><MoreVertical className="w-5 h-5" /></button>
+                      <button onClick={() => setIsHistoryMenuOpen(!isHistoryMenuOpen)} className="px-4 py-3 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl text-slate-500 dark:text-white flex items-center justify-center gap-2 shadow-sm hover:shadow-lg transition-all"><MoreVertical className="w-5 h-5" /></button>
                       {isHistoryMenuOpen && (
                         <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-2xl shadow-xl z-50 overflow-hidden">
-                          <button onClick={() => { exportHistoryData(); setIsHistoryMenuOpen(false); }} className="w-full px-6 py-4 text-left flex items-center gap-3 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-all border-b dark:border-slate-700 text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300"><Download className="w-4 h-4 text-emerald-600" /> {t.export}</button>
+                          <button onClick={() => { exportHistoryData(); setIsHistoryMenuOpen(false); }} className="w-full px-6 py-4 text-left flex items-center gap-3 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all border-b dark:border-slate-700 text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-white"><Download className="w-4 h-4 text-indigo-600" /> {t.export}</button>
                           <button onClick={() => { deleteHistoryData(); setIsHistoryMenuOpen(false); }} className="w-full px-6 py-4 text-left flex items-center gap-3 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-all text-[10px] font-black uppercase tracking-widest text-rose-600 dark:text-rose-400"><Trash2 className="w-4 h-4" /> {t.delete_data}</button>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className={cn("rounded-[48px] border shadow-2xl overflow-hidden min-h-[550px] transition-all duration-500", theme === 'dark' ? "bg-slate-900 border-slate-800 shadow-emerald-950/20" : "bg-white border-slate-200 shadow-slate-200/50")}>
-                  <div className="overflow-x-auto"><table className="w-full text-left min-w-[800px] border-collapse"><thead className="bg-slate-50/50 dark:bg-slate-800/80 backdrop-blur sticky top-0 text-[10px] uppercase font-black text-slate-400 border-b dark:border-slate-800 z-10 tracking-[0.2em]"><tr className="px-10"><th className="pl-10 py-6 w-14">#</th><th className="px-6 py-6">Title</th><th className="px-6 py-6">Recipient</th><th className="px-6 py-6 text-center">Status</th></tr></thead><tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-[11px] font-bold">
-                    {historyRows.map((row, i) => (<tr key={i} className="hover:bg-slate-50/30 dark:hover:bg-slate-800/30 transition-all duration-300"><td className="pl-10 py-6 text-slate-300 dark:text-slate-700 font-black">{i+1}</td><td className="px-6 py-6"><span className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-400 rounded-xl text-[9px] font-black uppercase tracking-tight shadow-sm leading-none">{row['Judul broadcast']}</span></td><td className="px-6 py-6 font-mono tracking-tighter"><div>{row['nomor Tujuan']}</div></td><td className="px-6 py-6 text-center"><span className={cn("px-4 py-2 rounded-2xl text-[9px] font-black uppercase inline-flex items-center gap-1.5 shadow-sm", row['status']?.toLowerCase().includes('success') ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>{row['status'] === 'Success' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}{row['status']}</span></td></tr>))}
+                <div className={cn("rounded-[48px] border shadow-2xl overflow-hidden min-h-[550px] transition-all duration-500", theme === 'dark' ? "bg-slate-900 border-slate-800 shadow-indigo-950/20" : "bg-white border-slate-200 shadow-slate-200/50")}>
+                  <div className="overflow-x-auto"><table className="w-full text-left min-w-[800px] border-collapse"><thead className="bg-slate-50/50 dark:bg-slate-800/80 backdrop-blur sticky top-0 text-[10px] uppercase font-black text-slate-400 dark:text-white border-b dark:border-slate-800 z-10 tracking-[0.2em]"><tr className="px-10"><th className="pl-10 py-6 w-14">#</th><th className="px-6 py-6">Title</th><th className="px-6 py-6">Recipient</th><th className="px-6 py-6 text-center">Status</th></tr></thead><tbody className="divide-y divide-slate-50 dark:divide-slate-800 text-[11px] font-bold">
+                    {historyRows.map((row, i) => (<tr key={i} className="hover:bg-slate-50/30 dark:hover:bg-slate-800/30 transition-all duration-300"><td className="pl-10 py-6 text-slate-300 dark:text-white font-black">{i+1}</td><td className="px-6 py-6"><span className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-tight shadow-sm leading-none">{row['Judul broadcast']}</span></td><td className="px-6 py-6 font-mono tracking-tighter"><div className="text-slate-900 dark:text-slate-100">{row['nomor Tujuan']}</div></td><td className="px-6 py-6 text-center"><span className={cn("px-4 py-2 rounded-2xl text-[9px] font-black uppercase inline-flex items-center gap-1.5 shadow-sm", row['status']?.toLowerCase().includes('success') ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>{row['status'] === 'Success' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}{row['status']}</span></td></tr>))}
                   </tbody></table></div>
-                  {historyRows.length === 0 && <div className="h-[400px] flex flex-col items-center justify-center gap-4 text-slate-300 dark:text-slate-700"><Database className="w-16 h-16 opacity-20" /><p className="font-black uppercase tracking-[0.3em] text-[10px]">No records detected</p></div>}
+                  {historyRows.length === 0 && <div className="h-[400px] flex flex-col items-center justify-center gap-4 text-slate-300 dark:text-white"><Database className="w-16 h-16 opacity-20 text-slate-400 dark:text-white" /><p className="font-black uppercase tracking-[0.3em] text-[10px]">No records detected</p></div>}
                 </div>
               </div>
             )}
@@ -544,11 +668,11 @@ function App() {
       {isMessageModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className={cn("rounded-[48px] shadow-[0_32px_80px_rgba(0,0,0,0.3)] w-full max-w-lg overflow-hidden border animate-in zoom-in duration-300", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100")}>
-            <div className="p-8 lg:p-10 border-b dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50 px-10 leading-none"><h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tight text-xl flex items-center gap-3"><MessageSquare className="w-6 h-6 text-emerald-500" /> Message Editor</h3><button onClick={() => setIsMessageModalOpen(false)} className="text-slate-300 hover:text-rose-500 transition-colors leading-none p-2"><X className="w-7 h-7" /></button></div>
+            <div className="p-8 lg:p-10 border-b dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50 px-10 leading-none"><h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tight text-xl flex items-center gap-3"><MessageSquare className="w-6 h-6 text-indigo-600" /> Message Editor</h3><button onClick={() => setIsMessageModalOpen(false)} className="text-slate-300 hover:text-rose-500 transition-colors leading-none p-2"><X className="w-7 h-7" /></button></div>
             <div className="p-10 space-y-8 leading-none">
-              <div className="bg-emerald-50 dark:bg-emerald-900/10 p-5 rounded-3xl border border-emerald-100 dark:border-emerald-800 text-[11px] text-emerald-800 dark:text-emerald-400 font-bold leading-relaxed shadow-sm">Pesan ini akan diterapkan ke <strong>seluruh antrean</strong>. Gunakan tag <code className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded text-emerald-600">{"{nama}"}</code>.</div>
-              <textarea value={bulkMessageInput} onChange={(e) => setBulkMessageInput(e.target.value)} placeholder="Tulis pesan massal Anda di sini..." className={cn("w-full h-48 p-6 border rounded-[32px] text-sm outline-none transition-all resize-none font-bold shadow-inner leading-relaxed", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-100 text-slate-700")} />
-              <div className="flex gap-4 pt-4"><button onClick={() => setIsMessageModalOpen(false)} className="flex-1 py-5 border rounded-[24px] font-black text-slate-400 uppercase tracking-widest text-[10px] hover:bg-slate-50 transition-all">{t.cancel}</button><button onClick={() => { if (!bulkMessageInput) return; setData(prev => prev.map(r => ({ ...r, Pesan: bulkMessageInput }))); setIsMessageModalOpen(false); addLog('System', 'info', 'Message Applied'); }} className="flex-1 py-5 bg-emerald-600 text-white rounded-[24px] font-black shadow-2xl uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition-all active:scale-95 shadow-emerald-500/20">{t.apply}</button></div>
+              <div className="bg-indigo-50 dark:bg-indigo-900/10 p-5 rounded-3xl border border-indigo-100 dark:border-indigo-800 text-[11px] text-indigo-800 dark:text-indigo-400 font-bold leading-relaxed shadow-sm">Pesan ini akan diterapkan ke <strong>seluruh antrean</strong>. Gunakan tag <code className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded text-indigo-600">{'{nama}'}</code>.</div>
+              <textarea value={bulkMessageInput} onChange={(e) => setBulkMessageInput(e.target.value)} placeholder="Tulis pesan massal Anda di sini..." className={cn("w-full h-48 p-6 border rounded-[32px] text-sm outline-none transition-all resize-none font-bold shadow-inner leading-relaxed", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300" : "bg-slate-50 border-slate-100 text-slate-700 placeholder-slate-400")} />
+              <div className="flex gap-4 pt-4"><button onClick={() => setIsMessageModalOpen(false)} className="flex-1 py-5 border rounded-[24px] font-black text-slate-400 dark:text-slate-50 uppercase tracking-widest text-[10px] hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">{t.cancel}</button><button onClick={() => { if (!bulkMessageInput) return; setData(prev => prev.map(r => ({ ...r, Pesan: bulkMessageInput }))); setIsMessageModalOpen(false); addLog('System', 'info', 'Message Applied'); }} className="flex-1 py-5 bg-indigo-600 text-white rounded-[24px] font-black shadow-lg shadow-indigo-600/30 uppercase tracking-widest text-[10px] hover:bg-indigo-700 transition-all active:scale-95">{t.apply}</button></div>
             </div>
           </div>
         </div>
@@ -558,7 +682,7 @@ function App() {
       {isAttachmentModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className={cn("rounded-[48px] shadow-[0_32px_80px_rgba(0,0,0,0.3)] w-full max-w-lg overflow-hidden border animate-in zoom-in duration-300", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100")}>
-            <div className="p-8 lg:p-10 border-b dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50 px-10 leading-none"><h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tight text-xl flex items-center gap-3 leading-none"><Paperclip className="w-6 h-6 text-emerald-500" /> {t.attachment}</h3><button onClick={() => setIsAttachmentModalOpen(false)} className="text-slate-300 hover:text-rose-500 transition-colors p-2 leading-none"><X className="w-7 h-7" /></button></div>
+            <div className="p-8 lg:p-10 border-b dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50 px-10 leading-none"><h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tight text-xl flex items-center gap-3 leading-none"><Paperclip className="w-6 h-6 text-indigo-600" /> {t.attachment}</h3><button onClick={() => setIsAttachmentModalOpen(false)} className="text-slate-300 hover:text-rose-500 transition-colors p-2 leading-none"><X className="w-7 h-7" /></button></div>
             <div className="p-10 space-y-10">
               <div className="bg-amber-50 dark:bg-amber-900/10 p-6 rounded-3xl border border-amber-100 dark:border-amber-800 flex gap-4 leading-relaxed">
                 <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
@@ -568,23 +692,23 @@ function App() {
               {!hasPaidPackage ? (
                 <div className="space-y-6 text-center leading-none">
                   <div className="bg-slate-50 dark:bg-slate-800 p-8 rounded-[32px] border dark:border-slate-700">
-                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2 italic">DETEKSI PAKET: {deviceInfo?.package || 'Unknown'}</p>
-                    <p className="text-slate-600 dark:text-slate-300 font-black text-xs uppercase leading-relaxed">Fitur media memerlukan paket berbayar<br />(Super/Advanced/Ultra).</p>
+                    <p className="text-slate-400 dark:text-white text-[10px] font-black uppercase tracking-widest mb-2 italic">DETEKSI PAKET: {deviceInfo?.package || 'Unknown'}</p>
+                    <p className="text-slate-600 dark:text-white font-black text-xs uppercase leading-relaxed">Fitur media memerlukan paket berbayar<br />(Super/Advanced/Ultra).</p>
                   </div>
-                  <a href="https://fonnte.com/#harga" target="_blank" rel="noopener noreferrer" className="w-full py-6 bg-emerald-600 text-white rounded-[24px] font-black text-[10px] tracking-widest uppercase shadow-2xl flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all animate-pulse shadow-emerald-500/20">
+                  <a href="https://fonnte.com/#harga" target="_blank" rel="noopener noreferrer" className="w-full py-6 bg-indigo-600 text-white rounded-[24px] font-black text-[10px] tracking-widest uppercase shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-3 hover:bg-indigo-700 transition-all animate-pulse">
                     <Zap className="w-5 h-5 fill-current" /> {t.subscribe} <ExternalLink className="w-4 h-4" />
                   </a>
                 </div>
               ) : (
                 <div className="space-y-6 leading-none">
                   <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Attachment URL (Public Image/File)</label>
+                    <label className="text-[10px] font-black text-slate-400 dark:text-white uppercase tracking-widest px-2">Attachment URL (Public Image/File)</label>
                     <input 
                       type="text" 
                       value={attachmentUrl} 
                       onChange={(e) => setAttachmentUrl(e.target.value)}
                       placeholder="https://example.com/image.jpg"
-                      className={cn("w-full px-8 py-5 border rounded-3xl outline-none font-bold text-sm focus:ring-4 focus:ring-emerald-500/10 transition-all", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white" : "bg-slate-50 border-slate-100 text-slate-700")} 
+                      className={cn("w-full px-8 py-5 border rounded-3xl outline-none font-bold text-sm focus:ring-4 focus:ring-indigo-500/20 transition-all", theme === 'dark' ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300" : "bg-slate-50 border-slate-100 text-slate-700 placeholder-slate-400")}  
                     />
                   </div>
                   <button 
@@ -593,7 +717,7 @@ function App() {
                       setIsAttachmentModalOpen(false);
                       addLog('System', 'success', 'Media Attachment Applied');
                     }}
-                    className="w-full py-6 bg-emerald-600 text-white rounded-[24px] font-black text-[10px] tracking-widest uppercase shadow-2xl hover:bg-emerald-700 transition-all shadow-emerald-500/20"
+                    className="w-full py-6 bg-indigo-600 text-white rounded-[24px] font-black text-[10px] tracking-widest uppercase shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 transition-all"
                   >
                     APPLY MEDIA URL
                   </button>
@@ -607,26 +731,63 @@ function App() {
 
       {/* MODAL: Select Broadcast for Export/Delete */}
       {isSelectBroadcastModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className={cn("rounded-[48px] shadow-[0_32px_80px_rgba(0,0,0,0.3)] w-full max-w-lg overflow-hidden border animate-in zoom-in duration-300", theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100")}>
-            <div className="p-8 lg:p-10 border-b dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50 px-10 leading-none">
-              <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-tight text-lg flex items-center gap-3">
-                {selectBroadcastAction === 'export' ? (
-                  <>
-                    <Download className="w-6 h-6 text-emerald-500" /> Pilih {lang === 'id' ? 'untuk Di Export' : 'to Export'}
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-6 h-6 text-rose-500" /> Pilih {lang === 'id' ? 'untuk Dihapus' : 'to Delete'}
-                  </>
-                )}
-              </h3>
-              <button onClick={() => setIsSelectBroadcastModalOpen(false)} className="text-slate-300 hover:text-rose-500 transition-colors leading-none p-2">
-                <X className="w-7 h-7" />
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className={cn("rounded-[32px] shadow-2xl w-full max-w-2xl overflow-hidden border animate-in zoom-in duration-300 max-h-[85vh] flex flex-col", theme === 'dark' ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200")}>
+            
+            {/* HEADER */}
+            <div className={cn("p-6 lg:p-8 border-b backdrop-blur-sm flex justify-between items-start gap-4", theme === 'dark' ? "bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-slate-700" : "bg-gradient-to-r from-slate-50 via-white to-slate-50 border-slate-200")}>
+              <div className="space-y-2 flex-1">
+                <div className="flex items-center gap-3">
+                  <div className={cn("p-2.5 rounded-2xl", selectBroadcastAction === 'export' ? "bg-emerald-100 dark:bg-emerald-900/30" : "bg-rose-100 dark:bg-rose-900/30")}>
+                    {selectBroadcastAction === 'export' ? (
+                      <Download className={cn("w-5 h-5", selectBroadcastAction === 'export' ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")} />
+                    ) : (
+                      <Trash2 className={cn("w-5 h-5", selectBroadcastAction === 'export' ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")} />
+                    )}
+                  </div>
+                  <h3 className={cn("font-black text-lg lg:text-xl uppercase tracking-tight", theme === 'dark' ? "text-white" : "text-slate-900")}>
+                    {selectBroadcastAction === 'export' 
+                      ? (lang === 'id' ? 'Pilih Data untuk Export' : 'Select Data to Export')
+                      : (lang === 'id' ? 'Pilih Data untuk Dihapus' : 'Select Data to Delete')
+                    }
+                  </h3>
+                </div>
+                <p className={cn("text-[11px] font-semibold uppercase tracking-widest", theme === 'dark' ? "text-white" : "text-slate-500")}>
+                  {lang === 'id' ? `${getCountForBroadcast(null)} data tersimpan` : `${getCountForBroadcast(null)} records stored`}
+                </p>
+              </div>
+              <button onClick={() => { setIsSelectBroadcastModalOpen(false); setSearchBroadcast(''); }} className={cn("p-2 rounded-xl transition-all hover:scale-110", theme === 'dark' ? "hover:bg-slate-800" : "hover:bg-slate-100")}>
+                <X className={cn("w-6 h-6", theme === 'dark' ? "text-slate-300" : "text-slate-500")} />
               </button>
             </div>
-            <div className="p-10 space-y-4 leading-none max-h-96 overflow-y-auto">
-              {/* Option: All */}
+
+            {/* SEARCH & INFO */}
+            <div className={cn("p-6 lg:p-8 border-b space-y-4", theme === 'dark' ? "border-slate-700 bg-slate-800/20" : "border-slate-200 bg-slate-50/50")}>
+              <div className="relative">
+                <Search className={cn("absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5", theme === 'dark' ? "text-slate-300" : "text-slate-400")} />
+                <input 
+                  type="text"
+                  value={searchBroadcast}
+                  onChange={(e) => setSearchBroadcast(e.target.value)}
+                  placeholder={lang === 'id' ? 'Cari nama broadcast...' : 'Search broadcast name...'}
+                  className={cn("w-full pl-12 pr-4 py-3 rounded-xl border-2 outline-none transition-all text-sm font-semibold", 
+                    theme === 'dark' 
+                      ? "bg-slate-800 border-slate-700 text-white placeholder-slate-300 focus:border-indigo-500 focus:bg-slate-700" 
+                      : "bg-white border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:bg-indigo-50"
+                  )}
+                />
+              </div>
+              {searchBroadcast && (
+                <p className={cn("text-[10px] font-black uppercase tracking-widest", theme === 'dark' ? "text-slate-300" : "text-slate-600")}>
+                  {lang === 'id' ? `Ditemukan ${getBroadcastList().length} broadcast` : `Found ${getBroadcastList().length} broadcasts`}
+                </p>
+              )}
+            </div>
+
+            {/* CONTENT - SCROLLABLE */}
+            <div className={cn("flex-1 overflow-y-auto p-6 lg:p-8 space-y-3", theme === 'dark' ? "bg-slate-800/40" : "bg-slate-50/50")}>
+              
+              {/* SELECT ALL OPTION */}
               <button 
                 onClick={() => {
                   if (selectBroadcastAction === 'export') {
@@ -635,51 +796,149 @@ function App() {
                     executeDelete(null);
                   }
                   setIsSelectBroadcastModalOpen(false);
+                  setSearchBroadcast('');
                   setSelectBroadcastAction(null);
                 }}
-                className={cn("w-full p-4 rounded-2xl border-2 text-left font-black text-sm uppercase tracking-wider transition-all hover:scale-102", 
+                className={cn("w-full p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 group relative overflow-hidden", 
                   theme === 'dark' 
-                    ? "border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700" 
-                    : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100"
+                    ? "border-emerald-700/50 bg-gradient-to-r from-emerald-900/20 to-emerald-800/10 hover:border-emerald-600 hover:from-emerald-900/30 hover:to-emerald-800/20" 
+                    : "border-emerald-300 bg-gradient-to-r from-emerald-50 to-emerald-100/50 hover:border-emerald-400 hover:from-emerald-100 hover:to-emerald-200/50"
                 )}
               >
-                {lang === 'id' ? '📋 Semua Broadcast' : '📋 All Broadcasts'}
+                <div className="flex items-center gap-3 relative z-10">
+                  <div className={cn("w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all", selectBroadcastAction === 'export' ? "border-indigo-600 bg-indigo-600" : "border-rose-500 bg-rose-500")}>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className={cn("font-black text-sm uppercase tracking-wide", theme === 'dark' ? "text-emerald-400" : "text-emerald-700")}>
+                      {lang === 'id' ? '📋 Semua Broadcast' : '📋 All Broadcasts'}
+                    </p>
+                    <p className={cn("text-[10px] font-semibold", theme === 'dark' ? "text-slate-300" : "text-slate-600")}>
+                      {getCountForBroadcast(null)} {lang === 'id' ? 'data' : 'records'}
+                    </p>
+                  </div>
+                  <div className={cn("text-lg font-black", selectBroadcastAction === 'export' ? "text-indigo-600" : "text-rose-500")}>→</div>
+                </div>
               </button>
 
-              {/* Divider */}
-              <div className={cn("h-px", theme === 'dark' ? "bg-slate-700" : "bg-slate-200")} />
+              {/* DIVIDER */}
+              <div className={cn("h-px my-2", theme === 'dark' ? "bg-slate-700" : "bg-slate-300")} />
 
-              {/* Individual Broadcast Options */}
-              {Array.from(new Set(historyRows.map(r => r['Judul broadcast']))).map((title, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    if (selectBroadcastAction === 'export') {
-                      executeExport(title);
-                    } else {
-                      executeDelete(title);
-                    }
-                    setIsSelectBroadcastModalOpen(false);
-                    setSelectBroadcastAction(null);
-                  }}
-                  className={cn("w-full p-4 rounded-2xl border-2 text-left font-black text-sm uppercase tracking-wider transition-all hover:scale-102", 
-                    theme === 'dark' 
-                      ? "border-emerald-700/50 bg-slate-800 text-emerald-400 hover:bg-slate-700 hover:border-emerald-600" 
-                      : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-400"
-                  )}
-                >
-                  📄 {title}
-                </button>
-              ))}
+              {/* INDIVIDUAL BROADCAST OPTIONS */}
+              {getBroadcastList().length > 0 ? (
+                <div className="grid grid-cols-1 gap-2.5">
+                  {getBroadcastList().map((title, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        if (selectBroadcastAction === 'export') {
+                          executeExport(title);
+                        } else {
+                          executeDelete(title);
+                        }
+                        setIsSelectBroadcastModalOpen(false);
+                        setSearchBroadcast('');
+                        setSelectBroadcastAction(null);
+                      }}
+                      className={cn("w-full p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 group text-left", 
+                        theme === 'dark' 
+                          ? "border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 hover:border-slate-600" 
+                          : "border-slate-200 bg-slate-100/50 hover:bg-slate-200/50 hover:border-slate-300"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={cn("w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all", theme === 'dark' ? "border-slate-600 bg-slate-700" : "border-slate-300 bg-slate-200")}>
+                          <span className={cn("text-[10px] font-black", theme === 'dark' ? "text-slate-300" : "text-slate-600")}>✓</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={cn("font-black text-sm uppercase tracking-wide truncate", theme === 'dark' ? "text-white group-hover:text-emerald-400" : "text-slate-800 group-hover:text-emerald-600")}>
+                            📄 {title}
+                          </p>
+                          <p className={cn("text-[10px] font-semibold", theme === 'dark' ? "text-slate-200" : "text-slate-600")}>
+                            {getCountForBroadcast(title)} {lang === 'id' ? 'data' : 'records'}
+                          </p>
+                        </div>
+                        <div className={cn("text-lg font-black transition-all", theme === 'dark' ? "text-slate-300 group-hover:text-indigo-400" : "text-slate-400 group-hover:text-indigo-600")}>→</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-32 flex flex-col items-center justify-center gap-2 text-center">
+                  <Database className={cn("w-10 h-10 opacity-20", theme === 'dark' ? "text-slate-200" : "text-slate-400")} />
+                  <p className={cn("text-xs font-black uppercase tracking-wide", theme === 'dark' ? "text-slate-300" : "text-slate-600")}>
+                    {lang === 'id' ? 'Tidak ada broadcast ditemukan' : 'No broadcasts found'}
+                  </p>
+                </div>
+              )}
             </div>
-            <div className="p-4 border-t dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-              <button onClick={() => setIsSelectBroadcastModalOpen(false)} className="w-full py-3 border rounded-xl font-black text-slate-400 uppercase tracking-widest text-[10px] hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
+
+            {/* FOOTER */}
+            <div className={cn("p-4 lg:p-6 border-t flex gap-3", theme === 'dark' ? "bg-slate-800/50 border-slate-700" : "bg-slate-50/50 border-slate-200")}>
+              <button 
+                onClick={() => { 
+                  setIsSelectBroadcastModalOpen(false); 
+                  setSearchBroadcast('');
+                }} 
+                className={cn("flex-1 py-3 px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95", 
+                  theme === 'dark' 
+                    ? "bg-slate-800 text-white hover:bg-slate-700" 
+                    : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                )}
+              >
                 {t.cancel}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {confirmModal && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className={cn("w-full max-w-md rounded-[32px] border shadow-2xl overflow-hidden", theme === 'dark' ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200")}>
+            <div className={cn("p-6 border-b", theme === 'dark' ? "border-slate-700 bg-slate-950/90" : "border-slate-200 bg-slate-50")}>
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-2">
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">{confirmModal.title}</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-300">{confirmModal.message}</p>
+                </div>
+                <button onClick={() => setConfirmModal(null)} className="p-2 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-100 transition-all"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+            <div className="p-6 bg-slate-50 dark:bg-slate-950/90 flex gap-3">
+              <button onClick={() => setConfirmModal(null)} className={cn("flex-1 py-3 rounded-2xl border font-black text-sm uppercase tracking-[0.2em] transition-all", theme === 'dark' ? "border-slate-700 bg-slate-900 text-white hover:bg-slate-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100")}>
+                {confirmModal.cancelLabel}
+              </button>
+              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(null); }} className="flex-1 py-3 rounded-2xl bg-rose-500 text-white font-black text-sm uppercase tracking-[0.2em] hover:bg-rose-600 transition-all">
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-3 items-end">
+        {notifications.map((notification) => (
+          <div key={notification.id} className={cn("w-full max-w-sm rounded-3xl border p-4 shadow-2xl backdrop-blur-xl text-left overflow-hidden border-opacity-70 transition-all duration-300", 
+            notification.variant === 'success' ? 'bg-emerald-600/95 border-emerald-300 text-white shadow-emerald-500/30' : 
+            notification.variant === 'error' ? 'bg-rose-600/95 border-rose-300 text-white shadow-rose-500/30' : 
+            notification.variant === 'warning' ? 'bg-amber-500/95 border-amber-300 text-slate-950 shadow-amber-400/30' :
+            'bg-slate-950/95 border-slate-300 text-slate-100 shadow-slate-900/30'
+          )}>
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5">
+                {notification.variant === 'success' && <CheckCircle2 className="w-5 h-5 text-white" />}
+                {notification.variant === 'error' && <XCircle className="w-5 h-5 text-white" />}
+                {notification.variant === 'warning' && <AlertTriangle className="w-5 h-5 text-slate-950" />}
+                {notification.variant === 'info' && <Info className="w-5 h-5 text-white" />}
+              </div>
+              <div className="min-w-0">
+                <div className="font-black text-sm uppercase tracking-[0.2em]">{notification.title}</div>
+                <p className="text-xs leading-relaxed mt-1 opacity-90">{notification.message}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
