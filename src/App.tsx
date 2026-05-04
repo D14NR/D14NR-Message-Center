@@ -473,6 +473,9 @@ export default function App() {
     return Math.floor(Math.random() * (mx - mn + 1) + mn);
   };
 
+  const getRandomStageDelaySeconds = () =>
+    Math.floor(Math.random() * (60 - 30 + 1) + 30);
+
   const startBroadcast = async () => {
     if (isBroadcasting) {
       setIsBroadcasting(false);
@@ -484,18 +487,37 @@ export default function App() {
       return;
     }
     const validStatuses = ["Pending", "WA Active", ""];
-    if (!data.some((row) => validStatuses.includes(row.Status))) {
+    const queuedIndexes = data
+      .map((row, index) => (validStatuses.includes(row.Status) ? index : -1))
+      .filter((index) => index >= 0);
+
+    if (queuedIndexes.length === 0) {
       showNotification("info", "Tidak Ada Pending", "No pending rows available.");
       return;
     }
+
     setIsBroadcasting(true);
     isBroadcastingRef.current = true;
     const maxRetries = 2;
+    const stageSize = 25;
+    const totalStages = Math.ceil(queuedIndexes.length / stageSize);
 
-    for (let i = 0; i < data.length; i += 1) {
+    for (let position = 0; position < queuedIndexes.length; position += 1) {
       if (!isBroadcastingRef.current) break;
+      const i = queuedIndexes[position];
       const row = data[i];
-      if (!validStatuses.includes(row.Status)) continue;
+      const currentStage = Math.floor(position / stageSize) + 1;
+
+      if (position % stageSize === 0) {
+        addLog(
+          "System",
+          "info",
+          `Starting stage ${currentStage}/${totalStages} (${Math.min(
+            stageSize,
+            queuedIndexes.length - position
+          )} data)`
+        );
+      }
 
       setCurrentIndex(i);
       let attempt = 1;
@@ -523,8 +545,19 @@ export default function App() {
       logToSheet(row["Nomor Telepon"], status);
       if (res.success) checkConnection(true);
 
-      // Follow the requested flow: delay is applied after a successful send.
-      if (res.success && i < data.length - 1 && isBroadcastingRef.current) {
+      const hasNextMessage = position < queuedIndexes.length - 1;
+      if (!hasNextMessage || !isBroadcastingRef.current) continue;
+
+      const endOfStage = (position + 1) % stageSize === 0;
+      if (endOfStage) {
+        const stageDelay = getRandomStageDelaySeconds();
+        addLog(
+          "System",
+          "info",
+          `Stage ${currentStage} completed. Waiting ${stageDelay}s before next stage...`
+        );
+        await waitSeconds(stageDelay);
+      } else {
         const rd = getRandomDelaySeconds();
         addLog("System", "info", `Waiting ${rd}s for next message...`);
         await waitSeconds(rd);
@@ -605,6 +638,8 @@ export default function App() {
     success: data.filter((r) => r.Status === "Success").length,
     failed: data.filter((r) => r.Status === "Failed").length,
   };
+  const invalidWaCount = data.filter((r) => r.Status === "No WA").length;
+  const allWaActive = data.length > 0 && data.every((r) => r.Status === "WA Active");
 
   const hasPaidPackage =
     deviceInfo?.package &&
@@ -1063,21 +1098,45 @@ export default function App() {
                             <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-300" />
                           </div>
                         </div>
-                        <button
-                          onClick={() =>
-                            openConfirmModal({
-                              title: lang === "id" ? "Konfirmasi Clear" : "Confirm Clear",
-                              message:
-                                lang === "id" ? "Hapus semua data antrean?" : "Clear all queued data?",
-                              confirmLabel: lang === "id" ? "HAPUS" : "CLEAR",
-                              cancelLabel: lang === "id" ? "BATAL" : "CANCEL",
-                              onConfirm: () => setData([]),
-                            })
-                          }
-                          className="text-slate-400 dark:text-slate-300 hover:text-rose-500 p-2"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {invalidWaCount > 0 && (
+                            <button
+                              onClick={() => {
+                                setData((prev) => prev.filter((row) => row.Status !== "No WA"));
+                                showNotification(
+                                  "info",
+                                  lang === "id" ? "Nomor Tidak Valid Dihapus" : "Invalid Numbers Removed",
+                                  lang === "id"
+                                    ? `${invalidWaCount} nomor tidak terdaftar telah dihapus`
+                                    : `${invalidWaCount} unregistered numbers removed`
+                                );
+                              }}
+                              className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800"
+                            >
+                              {lang === "id" ? "Hapus Nomor Tidak Valid" : "Remove Invalid Numbers"}
+                            </button>
+                          )}
+                          {invalidWaCount === 0 && allWaActive && (
+                            <span className="ui-chip ui-chip-success">
+                              {lang === "id" ? "Siap" : "Ready"}
+                            </span>
+                          )}
+                          <button
+                            onClick={() =>
+                              openConfirmModal({
+                                title: lang === "id" ? "Konfirmasi Clear" : "Confirm Clear",
+                                message:
+                                  lang === "id" ? "Hapus semua data antrean?" : "Clear all queued data?",
+                                confirmLabel: lang === "id" ? "HAPUS" : "CLEAR",
+                                cancelLabel: lang === "id" ? "BATAL" : "CANCEL",
+                                onConfirm: () => setData([]),
+                              })
+                            }
+                            className="text-slate-400 dark:text-slate-300 hover:text-rose-500 p-2"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex-1 overflow-auto px-2 lg:px-4">
                         <table className="w-full text-left border-collapse min-w-[700px]">
