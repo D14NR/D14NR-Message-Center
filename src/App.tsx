@@ -169,7 +169,7 @@ export default function App() {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [logs, setLogs] = useState<any[]>([]);
-  const [delayRange, setDelayRange] = useState("10-25");
+  const [delayRange, setDelayRange] = useState("25-40");
   const [broadcastTitle, setBroadcastTitle] = useState("");
   const isBroadcastingRef = useRef(false);
 
@@ -1089,7 +1089,7 @@ export default function App() {
                               onChange={(e) => setDelayRange(e.target.value)}
                               className="bg-transparent text-slate-700 dark:text-white text-[10px] font-black uppercase outline-none cursor-pointer appearance-none"
                             >
-                              {["10-25", "10-30", "10-35", "10-40", "10-45", "10-50", "10-55", "10-60"].map((r) => (
+                              {["25-40", "25-50", "25-60"].map((r) => (
                                 <option key={r} value={r}>
                                   {r}s
                                 </option>
@@ -1218,6 +1218,60 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+
+                    <section className={cn("rounded-3xl border p-4", theme === "dark" ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
+                          Broadcast Logs
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-300">
+                            {logs.length} entries
+                          </span>
+                          <button
+                            onClick={() => {
+                              if (logs.length === 0) return;
+                              openConfirmModal({
+                                title: lang === "id" ? "Bersihkan Log" : "Clear Logs",
+                                message:
+                                  lang === "id"
+                                    ? "Hapus semua broadcast logs?"
+                                    : "Delete all broadcast logs?",
+                                confirmLabel: lang === "id" ? "HAPUS" : "DELETE",
+                                cancelLabel: lang === "id" ? "BATAL" : "CANCEL",
+                                onConfirm: () => setLogs([]),
+                              });
+                            }}
+                            disabled={logs.length === 0}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border border-rose-300 text-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {lang === "id" ? "Bersihkan" : "Clear"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="max-h-44 overflow-auto space-y-2 pr-1">
+                        {logs.length === 0 && (
+                          <p className="text-xs text-slate-500 dark:text-slate-300">Belum ada log broadcast.</p>
+                        )}
+                        {logs.slice(0, 12).map((log, idx) => (
+                          <div key={`${log.timestamp}-${idx}`} className="text-xs flex items-center gap-2">
+                            <span className="text-slate-400 dark:text-slate-500 w-20 shrink-0">{log.timestamp}</span>
+                            <span
+                              className={cn(
+                                "w-2 h-2 rounded-full shrink-0",
+                                log.status === "success"
+                                  ? "bg-emerald-500"
+                                  : log.status === "error"
+                                    ? "bg-rose-500"
+                                    : "bg-indigo-500"
+                              )}
+                            />
+                            <span className="font-semibold truncate max-w-32">{log.target}</span>
+                            <span className="text-slate-500 dark:text-slate-300 truncate">{log.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   </div>
                 </div>
               </motion.div>
