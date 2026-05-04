@@ -204,6 +204,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const t = translations[lang];
+  const deviceStatusRaw = String(deviceInfo?.device_status || "").toLowerCase();
+  const isDeviceConnected = ["connect", "connected", "online"].includes(deviceStatusRaw);
   const viewMotion = {
     initial: { opacity: 0, y: 20 },
     animate: { opacity: 1, y: 0 },
@@ -280,11 +282,11 @@ export default function App() {
       if (response.data.status) {
         setDeviceInfo(response.data);
         setIsTokenChanged(false);
-      } else if (!silent) {
+      } else {
         setDeviceInfo(null);
       }
     } catch {
-      if (!silent) setDeviceInfo(null);
+      setDeviceInfo(null);
     } finally {
       if (!silent) setIsCheckingConnection(false);
     }
@@ -293,7 +295,8 @@ export default function App() {
   const fetchHistory = async () => {
     setIsFetchingHistory(true);
     try {
-      const response = await axios.get(HISTORY_SHEET_URL);
+      // Avoid stale CSV cache from Google export endpoint.
+      const response = await axios.get(`${HISTORY_SHEET_URL}&_ts=${Date.now()}`);
       const results = Papa.parse<HistoryRow>(response.data, {
         header: true,
         skipEmptyLines: true,
@@ -332,6 +335,53 @@ export default function App() {
     setIsSelectBroadcastModalOpen(true);
   };
 
+  const postWebhookPayload = async (payload: Record<string, any>): Promise<boolean> => {
+    try {
+      await axios.post(LOG_WEBHOOK, JSON.stringify(payload), {
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+      });
+      return true;
+    } catch {
+      try {
+        await axios.post(LOG_WEBHOOK, payload, {
+          headers: { "Content-Type": "application/json" },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  };
+
+  const deleteHistoryOnSheet = async (rowsToDelete: HistoryRow[]) => {
+    if (rowsToDelete.length === 0) return true;
+
+    const groupedByDevice = rowsToDelete.reduce<Record<string, HistoryRow[]>>((acc, row) => {
+      const key = (row.Device || "").trim();
+      if (!key) return acc;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    }, {});
+
+    for (const [device, rows] of Object.entries(groupedByDevice)) {
+      const targets = rows.map((r) => ({
+        judul: r["Judul broadcast"],
+        tujuan: r["nomor Tujuan"],
+      }));
+
+      const ok = await postWebhookPayload({
+        action: "DELETE_SELECTED",
+        device,
+        targets,
+      });
+
+      if (!ok) return false;
+    }
+
+    return true;
+  };
+
   const executeExport = (title: string | null) => {
     const dataToExport = title
       ? historyRows.filter((r) => r["Judul broadcast"] === title)
@@ -366,13 +416,35 @@ export default function App() {
       title: lang === "id" ? "Konfirmasi Hapus" : "Delete Confirmation",
       message: confirmMessage,
       onConfirm: () => {
-        if (title) {
-          setHistoryData((prev) => prev.filter((r) => r["Judul broadcast"] !== title));
-        } else {
-          setHistoryData([]);
-        }
-        setIsHistoryMenuOpen(false);
-        addLog("System", "info", lang === "id" ? "Data histori dihapus" : "History data deleted");
+        const run = async () => {
+          const rowsToDelete = title
+            ? historyRows.filter((r) => r["Judul broadcast"] === title)
+            : historyRows;
+
+          const success = await deleteHistoryOnSheet(rowsToDelete);
+          if (!success) {
+            showNotification(
+              "error",
+              lang === "id" ? "Gagal Hapus" : "Delete Failed",
+              lang === "id"
+                ? "Tidak dapat menghapus data di spreadsheet."
+                : "Unable to delete data from spreadsheet."
+            );
+            return;
+          }
+
+          const keySet = new Set(
+            rowsToDelete.map((r) => `${r.Device}|${r["Judul broadcast"]}|${r["nomor Tujuan"]}`)
+          );
+          setHistoryData((prev) =>
+            prev.filter((r) => !keySet.has(`${r.Device}|${r["Judul broadcast"]}|${r["nomor Tujuan"]}`))
+          );
+          setIsHistoryMenuOpen(false);
+          addLog("System", "info", lang === "id" ? "Data histori dihapus" : "History data deleted");
+          await fetchHistory();
+        };
+
+        void run();
       },
     });
   };
@@ -392,21 +464,30 @@ export default function App() {
     if (activeView === "history" && isLoggedIn) fetchHistory();
   }, [activeView, isLoggedIn]);
 
-  const logToSheet = async (target: string, status: string) => {
-    try {
-      const payload = {
-        action: "UPSERT",
-        device: deviceInfo?.name || "Unknown",
-        nomor_device: deviceInfo?.device || "-",
-        judul: broadcastTitle,
-        tujuan: target,
-        tanggal: new Date().toLocaleDateString("id-ID"),
-        status,
-      };
-      await axios.post(LOG_WEBHOOK, JSON.stringify(payload));
-    } catch (error) {
-      console.error(error);
-    }
+  useEffect(() => {
+    if (!isLoggedIn || !apiKey) return;
+    checkConnection(true);
+  }, [isLoggedIn, apiKey]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !apiKey) return;
+    const timer = window.setInterval(() => {
+      checkConnection(true);
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, apiKey]);
+
+  const logToSheet = async (target: string, status: string): Promise<boolean> => {
+    const payload = {
+      action: "UPSERT",
+      device: deviceInfo?.name || "Unknown",
+      nomor_device: deviceInfo?.device || "-",
+      judul: broadcastTitle,
+      tujuan: target,
+      tanggal: new Date().toLocaleDateString("id-ID"),
+      status,
+    };
+    return postWebhookPayload(payload);
   };
 
   const bulkCheckWhatsApp = async (rowsToCheck: SpreadsheetRow[]) => {
@@ -542,7 +623,10 @@ export default function App() {
         res.success ? "success" : "error",
         `${res.message} (attempt ${attempt})`
       );
-      logToSheet(row["Nomor Telepon"], status);
+      const historySaved = await logToSheet(row["Nomor Telepon"], status);
+      if (!historySaved) {
+        addLog("System", "error", `Failed writing history for ${row["Nomor Telepon"]}`);
+      }
       if (res.success) checkConnection(true);
 
       const hasNextMessage = position < queuedIndexes.length - 1;
@@ -607,7 +691,7 @@ export default function App() {
     icon: any;
   }) => {
     const handleClick = () => {
-      if (id === "broadcast" && !deviceInfo) {
+      if (id === "broadcast" && !isDeviceConnected) {
         showNotification("warning", "Butuh Token", "Silakan hubungkan token Fonnte!");
         setActiveView("configuration");
         setIsMobileMenuOpen(false);
@@ -790,7 +874,7 @@ export default function App() {
             <div
               className={cn(
                 "w-2.5 h-2.5 rounded-full",
-                deviceInfo?.device_status === "connect"
+                isDeviceConnected
                   ? "bg-indigo-500 animate-pulse"
                   : "bg-slate-300 dark:bg-slate-600"
               )}
@@ -801,6 +885,15 @@ export default function App() {
               </span>
               <span className="text-[11px] font-black truncate uppercase tracking-tighter">
                 {deviceInfo?.name || "OFFLINE"}
+              </span>
+              <span className={cn("text-[10px] font-semibold normal-case", isDeviceConnected ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300")}>
+                {isDeviceConnected ? "Connected" : "Disconnected"}
+              </span>
+              <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-300 normal-case">
+                Quota: {deviceInfo?.quota ?? "-"} msg
+              </span>
+              <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-300 normal-case">
+                Device: {deviceInfo?.device || "-"}
               </span>
             </div>
           </div>
@@ -1314,7 +1407,7 @@ export default function App() {
                           )}
                         />
                         <div className="flex gap-2">
-                          {deviceInfo ? (
+                          {isDeviceConnected ? (
                             <>
                               <div className="px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] tracking-widest flex items-center justify-center gap-2">
                                 <CheckCircle2 className="w-4 h-4" /> {t.connected}
@@ -1343,7 +1436,7 @@ export default function App() {
                               ) : isTokenChanged ? (
                                 t.connect
                               ) : (
-                                t.not_connected
+                                t.connect
                               )}
                             </button>
                           )}
